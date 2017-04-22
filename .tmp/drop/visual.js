@@ -10622,7 +10622,7 @@ var powerbi;
                     function Visual(options) {
                         this.meta = {
                             name: 'Smart Filter',
-                            version: '1.1.0',
+                            version: '1.1.1',
                             dev: false
                         };
                         console.log('%c' + this.meta.name + ' by OKViz ' + this.meta.version + (this.meta.dev ? ' (BETA)' : ''), 'font-weight:bold');
@@ -11329,7 +11329,7 @@ var powerbi;
                 name: 'SmartFilterBySQLBI1458262140625',
                 displayName: 'Smart Filter by OKViz',
                 class: 'Visual',
-                version: '1.1.0',
+                version: '1.1.1',
                 apiVersion: '1.5.0',
                 create: function (options) { return new powerbi.extensibility.visual.SmartFilterBySQLBI1458262140625.Visual(options); },
                 custom: true
