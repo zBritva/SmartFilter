@@ -96,7 +96,7 @@
                 },
                 "observerMode": {
                     "displayName": "Observer mode",
-                    "description": "Observer mode show all the filters applied to the measure in the page",
+                    "description": "Observer mode show the filters applied to the bound measure in the page (max 100 items)",
                     "type": {
                         "bool": true
                     }

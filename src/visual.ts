@@ -175,7 +175,7 @@ module powerbi.extensibility.visual {
 
             this.meta = {
                 name: 'Smart Filter',
-                version: '1.1.1',
+                version: '1.1.2',
                 dev: false
             };
             console.log('%c' + this.meta.name + ' by OKViz ' + this.meta.version + (this.meta.dev ? ' (BETA)' : ''), 'font-weight:bold');
@@ -196,7 +196,7 @@ module powerbi.extensibility.visual {
                 this.model = visualTransform(options, this.host);
                 $('div, svg', this.element).remove();
             }
-            if (this.model.dataPoints.length == 0) return;  
+            //if (this.model.dataPoints.length == 0) return;
 
             let host = this.host;
             let selectionManager  = this.selectionManager;
@@ -233,7 +233,6 @@ module powerbi.extensibility.visual {
                 if (dataChanged) {
                     tokenizer.maxElements = this.model.settings.search.limit || Infinity;
                     tokenizer.compressMultiple = (this.model.settings.search.compressMultiple && this.model.settings.search.observerMode !== true);
-                    tokenizer.toggleDropdownArrow();
                     tokenizer.toggleResetter(this.model.settings.search.observerMode !== true);
                     tokenizer.elementsFontSize = PixelConverter.fromPointToPixel(this.model.settings.search.fontSize); 
                     tokenizer.elementsBackColor = this.model.settings.search.backFill.solid.color;
@@ -259,15 +258,20 @@ module powerbi.extensibility.visual {
                     let hasSelection = false;
                     let selectionIds = selectionManager.getSelectionIds();
 
+                    let maxSelectedValues = 100;
+                    let selectedValues = 0;
+                    let values = [];
                     for (let i = 0; i < this.model.dataPoints.length; i++) {
                         let dataPoint = this.model.dataPoints[i];
                         let value = (Object.prototype.toString.call(dataPoint.category) === '[object Date]' ? dateFormat(dataPoint.category) : dataPoint.category);
+                        values.push(value);
 
                         let $option = $('<option value="' + value + '">' + value + '</option>')    
                                 .appendTo($comboBox);
                         $option.data('datapoint', i);
-                        if (dataPoint.selected || this.model.settings.search.observerMode) {
+                        if (selectedValues < maxSelectedValues && dataPoint.selected) {
                             $option.attr('selected', 'selected');
+                            selectedValues++;
                         }
                         if (dataPoint.selected) {
                             hasSelection = true;
@@ -285,7 +289,15 @@ module powerbi.extensibility.visual {
                             }
                         }
                     }
-                    tokenizer.remap();
+                    if (!hasSelection && this.model.settings.search.observerMode){
+                        for (let i = 0; i < Math.min(values.length, maxSelectedValues); i++) {
+                            $comboBox.find('option[value="' + values[i] + '"]').attr('selected', 'selected');
+                            selectedValues++;
+                        }
+                    }
+                    tokenizer.toggleReadonly(this.model.settings.search.observerMode);
+                    tokenizer.remap(values);
+                    tokenizer.toggleDropdownArrow(selectedValues < values.length);
 
                     var self = this;
                     let performSelection = function (value, add) {
@@ -304,7 +316,7 @@ module powerbi.extensibility.visual {
                                         found = true;
                                         break;
                                     }
-                                }
+                                } 
 
                                 if (add && !found)
                                     self.model.filters.push(JSON.stringify(value));
@@ -314,6 +326,7 @@ module powerbi.extensibility.visual {
                                    selectionManager.select(dataPoint.identity, true);
                                    selectionManager.applySelectionFilter();
                                 }
+
                                 host.persistProperties({
                                     merge: [{
                                         objectName: 'general',
@@ -326,7 +339,7 @@ module powerbi.extensibility.visual {
                                 return false; //Break each
                             }
                         });
-                    };
+                    }; 
 
                     tokenizer.onAddToken = function (value, text, e) {
                         performSelection(value, true);
@@ -355,6 +368,7 @@ module powerbi.extensibility.visual {
                 }
 
                 tokenizer.container.width(containerSize.width);
+                $('.TokensContainer').css('max-height', containerSize.height + 'px');
                 $('ul.Dropdown').css('max-height', (containerSize.height - $('.TokensContainer').height()) + 'px');
             }
 
@@ -455,11 +469,14 @@ module powerbi.extensibility.visual {
         private dropdown: JQuery;
         private dropdownArrow: JQuery;
         private dropdownResetter: JQuery;
-        public container: JQuery;
+        public container: JQuery; 
         private tokensContainer: JQuery;
         private searchToken: JQuery;
         private searchInput: JQuery;
         private keyTimeout;
+        private listStart: number;
+        private cachedValues: string[];
+   
 
         //Events
         public onAddToken: any = function (value, text, e) { };
@@ -485,7 +502,7 @@ module powerbi.extensibility.visual {
                 .on('click', function (e) {
                     e.stopImmediatePropagation();
                     if ($this.dropdown.is(':hidden'))
-                        $this.search();
+                        $this.listAll(true);
                     else
                         $this.dropdown.hide();
                 });
@@ -493,8 +510,7 @@ module powerbi.extensibility.visual {
             this.dropdownResetter = $('<span class="slicerHeader"><span class="clear" title= "Clear selections"> </span></span>')
                 .on('click', function (e) {
                     e.stopImmediatePropagation();
-                    $this.select.find('option:selected').removeAttr('selected').prop('selected', false);
-                    $this.searchInput.text('');
+                    $this.searchInput.val('');
                     $this.clear(false);
                 });
 
@@ -556,14 +572,15 @@ module powerbi.extensibility.visual {
                 }, 20);
             });
 
-            $(document).on('click', function () {
+            //TODO Find a better way to hide the dropdown
+            /*$(document).on('click', function () {
                 $this.dropdownHide();
                 if ($this.maxElements == 1) {
                     if ($this.searchInput.val()) {
                         $this.tokenAdd($this.searchInput.val(), '');
                     }
                 }
-            });
+            });*/
 
             this.resizeSearchInput();
             this.remap();
@@ -572,6 +589,7 @@ module powerbi.extensibility.visual {
         public toggleReadonly(isReadonly) {
             this.readonly = isReadonly;
             this.container.toggleClass('readonly', isReadonly);
+            this.searchInput.attr('disabled', isReadonly ? 'disabled' : null);
             this.resetPendingTokens();
         }
 
@@ -624,6 +642,8 @@ module powerbi.extensibility.visual {
  
         public dropdownAddItem(value, text?) {
 
+            if (!text) text = value;
+
             var alreadySelected = ($('li[data-value="' + value + '"]', this.tokensContainer).length > 0);
             var selectedItems = $('li.Token', this.tokensContainer).length;
 
@@ -673,21 +693,17 @@ module powerbi.extensibility.visual {
         }
 
         public dropdownHide() {
-            this.toggleDropdownArrow();
             this.dropdownReset();
-            
             this.dropdown.hide();
         }
 
         public dropdownReset() {
             this.dropdown.html('');
+            this.listStart = 0;
         }
 
-        public toggleDropdownArrow() {
-            var allOptions = $("option", this.select);
-            var selOptions = $("option:selected", this.select);
-            this.dropdownArrow.toggleClass('disabled', allOptions.length < 1 || allOptions.length === selOptions.length);
-            //this.dropdownArrow.toggleClass('disabled', allOptions.length < 1 || allOptions.length === selOptions.length || selOptions.length === this.maxElements);
+        public toggleDropdownArrow(show: boolean) {
+            this.dropdownArrow.toggleClass('disabled', !show);
         }
 
         public toggleResetter(show: boolean) {
@@ -720,8 +736,9 @@ module powerbi.extensibility.visual {
                             this.tokenRemove($('li.Token.PendingDelete').attr('data-value'));
                         } else {
                             $('li.Token:last', this.tokensContainer).addClass('PendingDelete');
+                            this.dropdownHide();
                         }
-                        this.dropdownHide();
+                        
                     }
                     break;
 
@@ -773,9 +790,10 @@ module powerbi.extensibility.visual {
                     break;
 
                 case Tokenizer.KEYS.BACKSPACE:
-                    if (this.searchInput.val()) {
+                    if (this.searchInput.val() != '') {
                         this.delaySearch();
                     } else {
+                        clearTimeout(this.keyTimeout);
                         this.dropdownHide();
                     }
                     break;
@@ -796,35 +814,61 @@ module powerbi.extensibility.visual {
             }, 500);
         }
 
+        public listAll(show?) {
+
+            if (!show && this.dropdown.is(':hidden')) return;
+
+            let chunk = 10;
+            let start = this.listStart || 0;
+            let end = Math.min(start + chunk, this.cachedValues.length);
+            this.listStart = end;
+            for (let i = start; i < end; i++) {
+
+                let value = this.cachedValues[i];
+                this.dropdownAddItem(value);
+            }
+            
+            if (end < this.cachedValues.length) {
+                var $this = this;
+                setTimeout(function(){ $this.listAll(); }, 500);
+            }
+
+            if (show && this.dropdown.is(':hidden')) {
+                //Dropdown toggle
+                $('li:first', this.dropdown).addClass('Hover');
+                this.dropdownUpdateColors();
+                this.dropdownShow();
+            }
+
+        }
+
         public search() {
 
-            
-            var $this = this;
-            var count = 1;
-
-            /*if ((this.maxElements > 0 && $('li.Token', this.tokensContainer).length >= this.maxElements)) {
-                return false;
-            }*/
-
-            var str = this.searchInput.val();
-            var found = false, regexp = new RegExp(str.replace(/[-[\]{}()*+?.,\\^$|#\s]/g, "\\$&"), 'i');
             this.dropdownReset();
 
+            var str = this.searchInput.val();
+            if (str.trim() === '') {
+                this.listAll(true);
+                return;
+            }
 
-            var $options = (this.compressMultiple && str === '' ? $('option', this.select) : $('option', this.select).not(':selected, :disabled'));
-            $options.each(function () {
-  
-                if (regexp.test($(this).html())) {
-                    $this.dropdownAddItem($(this).attr('value'), $(this).html());
-                    found = true;
-                    count++;
+            var max = 10;
+            var found = 0;
+            var regexp = new RegExp(str.replace(/[-[\]{}()*+?.,\\^$|#\s]/g, "\\$&"), 'i');
+
+            for (let i = 0; i < this.cachedValues.length; i++) {
+
+                let value = this.cachedValues[i];
+                if (regexp.test(value)) {
+                    this.dropdownAddItem(value);
+                    found++;
                 }
-                /*} else {
-                    return false;
-                }*/
-            });
 
-            if (found) {
+                if (found >= max) break;
+            }
+
+            //Dropdown toggle
+            if (found > 0) {
                 $('li:first', this.dropdown).addClass('Hover');
                 this.dropdownUpdateColors();
                 this.dropdownShow();
@@ -991,7 +1035,11 @@ module powerbi.extensibility.visual {
             return this;
         }
 
-        public remap() {
+        public remap(values?) {
+
+            if (values)
+                this.cachedValues = values;
+
             var $this = this;
             var tmp = $("option:selected", this.select);
         
@@ -1002,14 +1050,6 @@ module powerbi.extensibility.visual {
             });
 
             return this;
-        }
-
-        public toArray() {
-            var output = [];
-            $("option:selected", this.select).each(function () {
-                output.push($(this).val());
-            });
-            return output;
         }
 
         public escape(html) {
