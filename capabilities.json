@@ -2,19 +2,19 @@
     "dataRoles": [
         {
             "displayName": "Field",
-            "name": "field",
+            "name": "Values",
             "kind": "Grouping"
         }
     ], 
     "dataViewMappings": [
         {
             "conditions": [
-                { "field": { "max": 1 } }
+                { "Values": { "max": 1 } }
             ],
             "categorical": {
                 "categories": {
                     "for": {
-                        "in": "field"
+                        "in": "Values"
                     },
                     "dataReductionAlgorithm": {
                         "top": { 

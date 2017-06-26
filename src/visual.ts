@@ -175,7 +175,7 @@ module powerbi.extensibility.visual {
 
             this.meta = {
                 name: 'Smart Filter',
-                version: '1.1.2',
+                version: '1.1.3',
                 dev: false
             };
             console.log('%c' + this.meta.name + ' by OKViz ' + this.meta.version + (this.meta.dev ? ' (BETA)' : ''), 'font-weight:bold');
