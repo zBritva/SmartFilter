@@ -175,7 +175,7 @@ module powerbi.extensibility.visual {
 
             this.meta = {
                 name: 'Smart Filter',
-                version: '1.1.3',
+                version: '1.1.4',
                 dev: false
             };
             console.log('%c' + this.meta.name + ' by OKViz ' + this.meta.version + (this.meta.dev ? ' (BETA)' : ''), 'font-weight:bold');
@@ -263,7 +263,7 @@ module powerbi.extensibility.visual {
                     let values = [];
                     for (let i = 0; i < this.model.dataPoints.length; i++) {
                         let dataPoint = this.model.dataPoints[i];
-                        let value = (Object.prototype.toString.call(dataPoint.category) === '[object Date]' ? dateFormat(dataPoint.category) : dataPoint.category);
+                        let value = tokenizer.sanitize(Object.prototype.toString.call(dataPoint.category) === '[object Date]' ? dateFormat(dataPoint.category) : dataPoint.category);
                         values.push(value);
 
                         let $option = $('<option value="' + value + '">' + value + '</option>')    
@@ -642,8 +642,9 @@ module powerbi.extensibility.visual {
  
         public dropdownAddItem(value, text?) {
 
-            if (!text) text = value;
-
+            value = this.sanitize(value);
+            text = (text ? this.sanitize(text) : value);
+           
             var alreadySelected = ($('li[data-value="' + value + '"]', this.tokensContainer).length > 0);
             var selectedItems = $('li.Token', this.tokensContainer).length;
 
@@ -653,7 +654,6 @@ module powerbi.extensibility.visual {
                     .attr('data-value', value)
                     .attr('data-text', text)
                     .css('font-size', this.elementsFontSize + 'px')
-                    .html('<span>' + this.escape(text) + '</span>')
                     .on('click', function (e) {
                         e.stopImmediatePropagation();
                         $this.tokenAdd($(this).attr('data-value'), $(this).attr('data-text'));
@@ -663,7 +663,9 @@ module powerbi.extensibility.visual {
                     }).on('mouseout', function () {
                         $('li', $this.dropdown).removeClass('Hover');
                         $this.dropdownUpdateColors();
-                    });
+                    }).append('<span />');
+                    
+                item.find('span').text(text);
 
                 if (alreadySelected) {
                     item.addClass('Selected');
@@ -675,7 +677,7 @@ module powerbi.extensibility.visual {
                             'color': this.elementsColor,
                             'padding-top': (((this.elementsFontSize * 1.2) - 10) / 2) + 'px'
                         })
-                        .html("&#215;")
+                        .text("×")
                         .on('click', function (e) {
                             e.stopImmediatePropagation();
                             $this.tokenRemove(value);
@@ -882,13 +884,12 @@ module powerbi.extensibility.visual {
             let selectedItems = $('li.Token', this.tokensContainer).length;
             let useMultipleToken = (this.compressMultiple && selectedItems > 0);
 
-            value = value.replace(/["]/g, ''); //.trim();
-
+            value = this.sanitize(value);
             if (value == undefined || value == '') {
                 return this;
             }
 
-            text = text || value;
+            text = (text ? this.sanitize(text) : value);
             first = first || false;
 
             if (!this.readonly && this.maxElements > 0 && $('li.Token', this.tokensContainer).length >= this.maxElements) {
@@ -904,7 +905,7 @@ module powerbi.extensibility.visual {
                     'color': this.elementsColor,
                     'padding-top': (((this.elementsFontSize * 1.5) - 4) / 2) + 'px'
                 })
-                .html("&#215;")
+                .text("×")
                 .on('click', function (e) {
                     e.stopImmediatePropagation();
                     $this.tokenRemove(value);
@@ -938,13 +939,16 @@ module powerbi.extensibility.visual {
             var item = $('<li />')
                 .addClass('Token')
                 .attr('data-value', value)
-                .append('<span>' + text + '</span>')
+                .append('<span />')
                 .css({
                     'font-size': this.elementsFontSize + 'px',
                     'background-color': this.elementsBackColor,
                     'color': this.elementsColor
                 })
                 .prepend(close_btn);
+
+            item.find('span').text(text)
+                
 
             if (useMultipleToken) 
                 item.hide();
@@ -955,9 +959,9 @@ module powerbi.extensibility.visual {
             if (useMultipleToken) {
                 var $tokenMultiple = $('li.TokenMultiple', this.tokensContainer);
                 if ($tokenMultiple.length == 0) {
-                    $('<li />')
+                    $tokenMultiple = $('<li />')
                         .addClass('TokenMultiple')
-                        .append('<span>Multiple (' + (selectedItems + 1) + ')</span>')
+                        .append('<span />')
                         .css({
                             'font-size': this.elementsFontSize + 'px',
                             'font-style': 'italic',
@@ -966,9 +970,8 @@ module powerbi.extensibility.visual {
                         })
                         .insertBefore(this.searchToken);
 
-                } else {
-                    $tokenMultiple.html('<span>Multiple (' + (selectedItems + 1) + ')</span>');
                 }
+                $tokenMultiple.find('span').text('Multiple (' + (selectedItems + 1) + ')');
 
                 $('li.Token').hide();
             }
@@ -984,6 +987,8 @@ module powerbi.extensibility.visual {
         }
 
         public tokenRemove(value, first?) {
+
+            value = this.sanitize(value);
 
             var option = $('option[value="' + value + '"]', this.select);
 
@@ -1046,21 +1051,22 @@ module powerbi.extensibility.visual {
             this.clear(true);
 
             tmp.each(function () {
-                $this.tokenAdd($(this).val(), $(this).html(), true);
+                $this.tokenAdd($(this).val(), $(this).text(), true);
             });
 
             return this;
         }
 
-        public escape(html) {
-            return String(html).replace(/[<>]/g, function(s) {
+        public sanitize(html) {
+            return String(html).replace(/[<>"']/g, function(s) {
                 var map = {
                     "<": "&lt;",
-                    ">": "&gt;"
+                    ">": "&gt;",
+                    "\"": "",
+                    "'": ""
                 }
                 return map[s];
             });
-
         }
     }
 }
