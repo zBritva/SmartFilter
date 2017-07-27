@@ -500,7 +500,7 @@ module powerbi.extensibility.visual {
 
             this.dropdownArrow = $('<i class="arrow" title="Show all entries" />')
                 .on('click', function (e) {
-                    e.stopImmediatePropagation();
+                    //e.stopImmediatePropagation();
                     if ($this.dropdown.is(':hidden'))
                         $this.listAll(true);
                     else
@@ -509,7 +509,7 @@ module powerbi.extensibility.visual {
 
             this.dropdownResetter = $('<span class="slicerHeader"><span class="clear" title= "Clear selections"> </span></span>')
                 .on('click', function (e) {
-                    e.stopImmediatePropagation();
+                    //e.stopImmediatePropagation();
                     $this.searchInput.val('');
                     $this.clear(false);
                 });
@@ -536,7 +536,7 @@ module powerbi.extensibility.visual {
                 .insertAfter(this.select);
 
             this.tokensContainer.on('click', function (e) {
-                e.stopImmediatePropagation();
+                //e.stopImmediatePropagation();
                 $this.searchInput.get(0).focus();
                 if ($this.dropdown.is(':hidden') && $this.searchInput.val() != '') {
                     $this.search();
@@ -572,15 +572,9 @@ module powerbi.extensibility.visual {
                 }, 20);
             });
 
-            //TODO Find a better way to hide the dropdown
-            /*$(document).on('click', function () {
+            $('.chart').hover(null, function () {
                 $this.dropdownHide();
-                if ($this.maxElements == 1) {
-                    if ($this.searchInput.val()) {
-                        $this.tokenAdd($this.searchInput.val(), '');
-                    }
-                }
-            });*/
+            });
 
             this.resizeSearchInput();
             this.remap();
@@ -655,7 +649,7 @@ module powerbi.extensibility.visual {
                     .attr('data-text', text)
                     .css('font-size', this.elementsFontSize + 'px')
                     .on('click', function (e) {
-                        e.stopImmediatePropagation();
+                        //e.stopImmediatePropagation();
                         $this.tokenAdd($(this).attr('data-value'), $(this).attr('data-text'));
                     }).on('mouseover', function () {
                         $(this).addClass('Hover');
@@ -679,7 +673,7 @@ module powerbi.extensibility.visual {
                         })
                         .text("×")
                         .on('click', function (e) {
-                            e.stopImmediatePropagation();
+                            //e.stopImmediatePropagation();
                             $this.tokenRemove(value);
                         });
 
@@ -907,7 +901,7 @@ module powerbi.extensibility.visual {
                 })
                 .text("×")
                 .on('click', function (e) {
-                    e.stopImmediatePropagation();
+                    //e.stopImmediatePropagation();
                     $this.tokenRemove(value);
                 }));
 
