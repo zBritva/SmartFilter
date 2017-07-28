@@ -61,6 +61,7 @@ module powerbi.extensibility.visual {
             fill?: Fill;
             fontSize: number;
             border: boolean;
+            label:boolean;
             observerMode: boolean;
         };
 
@@ -78,6 +79,7 @@ module powerbi.extensibility.visual {
                 backFill: {solid: { color: "#F2C811" } },
                 fontSize: 10,
                 border: true,
+                label: false,
                 observerMode: false
             },
 
@@ -111,6 +113,7 @@ module powerbi.extensibility.visual {
                     backFill: getValue<Fill>(objects, "search", "backFill", settings.search.backFill),
                     fill: getValue<Fill>(objects, "search", "fill", settings.search.fill),
                     border: getValue<boolean>(objects, "search", "border", settings.search.border),
+                    label: getValue<boolean>(objects, "search", "label", settings.search.label),
                     observerMode: getValue<boolean>(objects, "search", "observerMode", settings.search.observerMode)
                 },
 
@@ -131,28 +134,30 @@ module powerbi.extensibility.visual {
         if (hasCategoricalData) {
 
             let dataCategorical = dataViews[0].categorical;
-            let category = dataCategorical.categories[0]; 
-            let categories = category.values;
-            
-            for (let i = 0; i < categories.length; i++) {
+            for (let c = 0; c < dataCategorical.categories.length; c++) {
 
-                let selected = false;
-                for (let ii = 0; ii < filters.length; ii++) {
-                    if (filters[ii] == JSON.stringify(categories[i])) {
-                        selected = true;
-                        break;
+                let category = dataCategorical.categories[c]; 
+                let categories = category.values;
+                
+                for (let i = 0; i < categories.length; i++) {
+
+                    let selected = false;
+                    for (let ii = 0; ii < filters.length; ii++) {
+                        if (filters[ii] == JSON.stringify(String(categories[i]))) {
+                            selected = true;
+                            break;
+                        }
                     }
+                
+                    dataPoints.push({
+                        category: String(categories[i]),
+                        displayName: category.source.displayName,
+                        format: category.source.format,
+                        selected: selected,
+                        identity: host.createSelectionIdBuilder().withCategory(category, i).createSelectionId()
+                    });
                 }
-               
-                dataPoints.push({
-                    category: categories[i],
-                    displayName: category.source.displayName,
-                    format: category.source.format,
-                    selected: selected,
-                    identity: host.createSelectionIdBuilder().withCategory(category, i).createSelectionId()
-                });
             }
-
         }
 
         return {
@@ -175,7 +180,7 @@ module powerbi.extensibility.visual {
 
             this.meta = {
                 name: 'Smart Filter',
-                version: '1.1.4',
+                version: '1.1.5',
                 dev: false
             };
             console.log('%c' + this.meta.name + ' by OKViz ' + this.meta.version + (this.meta.dev ? ' (BETA)' : ''), 'font-weight:bold');
@@ -196,7 +201,6 @@ module powerbi.extensibility.visual {
                 this.model = visualTransform(options, this.host);
                 $('div, svg', this.element).remove();
             }
-            //if (this.model.dataPoints.length == 0) return;
 
             let host = this.host;
             let selectionManager  = this.selectionManager;
@@ -261,29 +265,37 @@ module powerbi.extensibility.visual {
                     let maxSelectedValues = 100;
                     let selectedValues = 0;
                     let values = [];
+
                     for (let i = 0; i < this.model.dataPoints.length; i++) {
                         let dataPoint = this.model.dataPoints[i];
-                        let value = tokenizer.sanitize(Object.prototype.toString.call(dataPoint.category) === '[object Date]' ? dateFormat(dataPoint.category) : dataPoint.category);
+
+                        let value = tokenizer.sanitize(Object.prototype.toString.call(dataPoint.category) === '[object Date]' ? dateFormat(dataPoint.category) : String(dataPoint.category));
+
                         values.push(value);
 
                         let $option = $('<option value="' + value + '">' + value + '</option>')    
                                 .appendTo($comboBox);
+
                         $option.data('datapoint', i);
                         if (selectedValues < maxSelectedValues && dataPoint.selected) {
                             $option.attr('selected', 'selected');
                             selectedValues++;
                         }
                         if (dataPoint.selected) {
+
                             hasSelection = true;
                             let doSelect = true;
+
                             for (let ii = 0; ii < selectionIds.length; ii++) {
                                 let selectionId = <visuals.ISelectionId>selectionIds[ii];
+                                
                                 if (selectionId.getKey() === dataPoint.identity.getKey()) {
                                     doSelect = false;
                                     break;
                                 }
                             }
                             if (doSelect) {
+
                                 selectionManager.select(dataPoint.identity, true);
                                 selectionManager.applySelectionFilter();
                             }
@@ -306,37 +318,39 @@ module powerbi.extensibility.visual {
                             if ($(this).val().trim() === value.trim()) {
 
                                 let dataPoint = self.model.dataPoints[$(this).data('datapoint')];
-                                dataPoint.selected = add;
+                                if (dataPoint !== undefined) {
+                                    dataPoint.selected = add;
 
-                                let found = false;
-                                for (let i = 0; i < self.model.filters.length; i++) {
-                                    if (self.model.filters[i] === JSON.stringify(value)) {
-                                        if (!add)
-                                            self.model.filters.splice(i, 1)
-                                        found = true;
-                                        break;
-                                    }
-                                } 
+                                    let found = false;
 
-                                if (add && !found)
-                                    self.model.filters.push(JSON.stringify(value));
-                                
-                                //Don't select for add because follow an update 
-                                if (!add) {
-                                   selectionManager.select(dataPoint.identity, true);
-                                   selectionManager.applySelectionFilter();
+                                    for (let i = 0; i < self.model.filters.length; i++) {
+                                        if (self.model.filters[i] === JSON.stringify(value)) {
+                                            if (!add)
+                                                self.model.filters.splice(i, 1)
+                                            found = true;
+                                            break;
+                                        }
+                                    } 
+
+                                    if (add && !found)
+                                        self.model.filters.push(JSON.stringify(value));
+         
+                                    selectionManager.select(dataPoint.identity, true);
+                                    selectionManager.applySelectionFilter();
+
+                                    host.persistProperties({
+                                        merge: [{
+                                            objectName: 'general',
+                                            selector: null,
+                                            properties: {
+                                                'selection': JSON.stringify(self.model.filters)
+                                            },
+                                        }]
+                                    });
                                 }
 
-                                host.persistProperties({
-                                    merge: [{
-                                        objectName: 'general',
-                                        selector: null,
-                                        properties: {
-                                            'selection': JSON.stringify(self.model.filters)
-                                        },
-                                    }]
-                                });
                                 return false; //Break each
+                                
                             }
                         });
                     }; 
@@ -420,6 +434,7 @@ module powerbi.extensibility.visual {
                             "backFill": this.model.settings.search.backFill,
                             "fill": this.model.settings.search.fill,
                             "fontSize": this.model.settings.search.fontSize,
+                            //"label": this.model.settings.search.label,
                             "border": this.model.settings.search.border
                         },
                         selector: null
@@ -474,6 +489,7 @@ module powerbi.extensibility.visual {
         private searchToken: JQuery;
         private searchInput: JQuery;
         private keyTimeout;
+        private hideTimeout;
         private listStart: number;
         private cachedValues: string[];
    
@@ -572,8 +588,12 @@ module powerbi.extensibility.visual {
                 }, 20);
             });
 
-            $('.chart').hover(null, function () {
-                $this.dropdownHide();
+            $('.chart').hover(function(){
+                clearTimeout($this.hideTimeout);
+            }, function () {
+                $this.hideTimeout = setTimeout(function(){
+                    $this.dropdownHide();
+                }, 1000);
             });
 
             this.resizeSearchInput();
@@ -689,6 +709,7 @@ module powerbi.extensibility.visual {
         }
 
         public dropdownHide() {
+            clearTimeout(this.hideTimeout);
             this.dropdownReset();
             this.dropdown.hide();
         }
@@ -1052,15 +1073,10 @@ module powerbi.extensibility.visual {
         }
 
         public sanitize(html) {
-            return String(html).replace(/[<>"']/g, function(s) {
-                var map = {
-                    "<": "&lt;",
-                    ">": "&gt;",
-                    "\"": "",
-                    "'": ""
-                }
-                return map[s];
-            });
+            return String(html)
+                .replace(/(\"|')/g, '')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;');
         }
     }
 }

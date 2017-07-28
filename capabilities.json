@@ -94,6 +94,12 @@
                         "bool": true
                     }
                 },
+                "label": {
+                    "displayName": "Label",
+                    "type": {
+                        "bool": true
+                    }
+                },
                 "observerMode": {
                     "displayName": "Observer mode",
                     "description": "Observer mode show the filters applied to the bound measure in the page (max 100 items)",
