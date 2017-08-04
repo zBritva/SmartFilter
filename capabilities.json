@@ -1,7 +1,7 @@
 {
     "dataRoles": [
         {
-            "displayName": "Field",
+            "displayName": "Fields",
             "name": "Values",
             "kind": "Grouping"
         }
@@ -9,7 +9,7 @@
     "dataViewMappings": [
         {
             "conditions": [
-                { "Values": { "max": 1 } }
+                { "Values": { "min": 1 } }
             ],
             "categorical": {
                 "categories": {
@@ -52,8 +52,14 @@
                         "numeric": true
                     }
                 },
-                 "compressMultiple": {
+                "compressMultiple": {
                     "displayName": "Compress multiple items",
+                    "type": {
+                        "bool": true
+                    }
+                },
+                "filterMultiple": {
+                    "displayName": "Each box limit the others",
                     "type": {
                         "bool": true
                     }
@@ -95,7 +101,7 @@
                     }
                 },
                 "label": {
-                    "displayName": "Label",
+                    "displayName": "Placeholder",
                     "type": {
                         "bool": true
                     }

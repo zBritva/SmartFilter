@@ -4,7 +4,7 @@
     "displayName": "Smart Filter by OKViz",
     "guid": "SmartFilterBySQLBI1458262140625",
     "visualClassName": "Visual",
-    "version": "1.1.5",
+    "version": "1.1.6",
     "description": "Smart Filter by OKViz works like an observer, showing the current filters set in the report page, or like a slicer, allowing you to choose records from a drop-down list or search by typing a few letters.",
     "supportUrl": "http://okviz.com/smart-filter/",
     "gitHubUrl": "https://github.com/okviz/smartfilter"

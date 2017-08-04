@@ -36,17 +36,22 @@ module powerbi.extensibility.visual {
     }
 
     interface VisualViewModel {
-        dataPoints: VisualDataPoint[];
+        dataGroups: VisualDataGroup[];
         settings: VisualSettings;
-        filters: string[];
+        filters: any;
+    }
+
+    interface VisualDataGroup {
+        displayName: string;
+        dataPoints: VisualDataPoint[];
     }
 
     interface VisualDataPoint {
-        category?: any;
-        displayName: string;
+        displayName?: any;
         format?: string;
         selected?: boolean;
-        identity?: any;
+        identities?: visuals.ISelectionId[];
+        hiddenIdentities?: visuals.ISelectionId[];
     }
 
     interface VisualSettings {
@@ -62,6 +67,7 @@ module powerbi.extensibility.visual {
             fontSize: number;
             border: boolean;
             label:boolean;
+            filterMultiple: boolean;
             observerMode: boolean;
         };
 
@@ -80,6 +86,7 @@ module powerbi.extensibility.visual {
                 fontSize: 10,
                 border: true,
                 label: false,
+                filterMultiple: true,
                 observerMode: false
             },
 
@@ -114,6 +121,7 @@ module powerbi.extensibility.visual {
                     fill: getValue<Fill>(objects, "search", "fill", settings.search.fill),
                     border: getValue<boolean>(objects, "search", "border", settings.search.border),
                     label: getValue<boolean>(objects, "search", "label", settings.search.label),
+                    filterMultiple: getValue<boolean>(objects, "search", "filterMultiple", settings.search.filterMultiple),
                     observerMode: getValue<boolean>(objects, "search", "observerMode", settings.search.observerMode)
                 },
 
@@ -128,40 +136,108 @@ module powerbi.extensibility.visual {
 
     
         //Get DataPoints
-        let dataPoints: VisualDataPoint[] = [];
-        let filters = (settings.general.selection ? JSON.parse(settings.general.selection) : []);
+        let dataGroups:VisualDataGroup[] = [];
+        let filters = (settings.general.selection ? JSON.parse(settings.general.selection) : {});
 
         if (hasCategoricalData) {
 
             let dataCategorical = dataViews[0].categorical;
-            for (let c = 0; c < dataCategorical.categories.length; c++) {
-
-                let category = dataCategorical.categories[c]; 
-                let categories = category.values;
+            for (let g = 0; g < dataCategorical.categories.length; g++) {
                 
-                for (let i = 0; i < categories.length; i++) {
+                let dataPoints: VisualDataPoint[] = [];
 
-                    let selected = false;
-                    for (let ii = 0; ii < filters.length; ii++) {
-                        if (filters[ii] == JSON.stringify(String(categories[i]))) {
-                            selected = true;
+                let category = dataCategorical.categories[g]; 
+                let values = category.values;
+
+                let categoryName = category.source.displayName;
+
+                if (filters.constructor == Array) {
+
+                    //Keep compatible with old filters format
+                    let oldFilters = filters.slice(0);
+                    filters = {};
+                    filters[categoryName] = [];
+                    for (let i = 0; i < oldFilters.length; i++) {
+                        for (let ii = 0; ii < values.length; ii++) {
+                            if (String(values[ii]) == JSON.parse(oldFilters[i])) {
+                                let oldToIdentity = host.createSelectionIdBuilder().withCategory(category, ii).createSelectionId();
+                                filters[categoryName].push(oldToIdentity.getKey());
+                                break;
+                            }
+                        }
+                    }
+
+                } else {
+                    if (!(categoryName in filters))
+                        filters[categoryName] = [];
+                }
+
+                for (let i = 0; i < values.length; i++) {
+                    let displayName = String(values[i]);
+                    let identity: visuals.ISelectionId = host.createSelectionIdBuilder().withCategory(category, i).createSelectionId();
+
+                    //Check if there is a filter in other fields that limit these values
+                    let addIdentity = true;
+
+                    if (settings.search.filterMultiple) {
+                        for (let otherCategoryName in filters) {
+                            if (addIdentity && otherCategoryName != categoryName && filters.hasOwnProperty(otherCategoryName) && filters[otherCategoryName].length > 0) {
+
+                                addIdentity = false;
+                                for (let ii = 0; ii < filters[otherCategoryName].length; ii++) {
+                                    if (identity.getKey() == filters[otherCategoryName][ii]) {
+                                        addIdentity = true;
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    //Check if there are multiple values with the same name
+                    let unique = true;
+                    for (let d = 0; d < dataPoints.length; d++) {
+                        if (dataPoints[d].displayName == displayName){
+                            unique = false;
+                            if (addIdentity)
+                                dataPoints[d].identities.push(identity);
+                            else
+                                dataPoints[d].hiddenIdentities.push(identity);
                             break;
                         }
                     }
-                
-                    dataPoints.push({
-                        category: String(categories[i]),
-                        displayName: category.source.displayName,
-                        format: category.source.format,
-                        selected: selected,
-                        identity: host.createSelectionIdBuilder().withCategory(category, i).createSelectionId()
-                    });
+
+                    if (unique) {
+                        //Check if value is in the filter
+                        let selected = false;
+                        for (let ii = 0; ii < filters[categoryName].length; ii++) {
+                            if (filters[categoryName][ii] == identity.getKey()) {
+                                selected = true;
+                                break;
+                            }
+                        }
+                        
+                        dataPoints.push({
+                            displayName: displayName,
+                            format: category.source.format,
+                            selected: selected,
+                            identities: (addIdentity ? [identity] : []),
+                            hiddenIdentities: (addIdentity ? [] : [identity])
+                        });
+                    }
+                    
+
                 }
+
+                dataGroups.push({
+                    displayName: categoryName,
+                    dataPoints: dataPoints
+                });
             }
         }
 
         return {
-            dataPoints: dataPoints,
+            dataGroups: dataGroups,
             filters: filters,
             settings: settings,
         };
@@ -173,14 +249,14 @@ module powerbi.extensibility.visual {
         private selectionManager: ISelectionManager;
         private selectionIdBuilder: ISelectionIdBuilder;
         private model: VisualViewModel;
-        private tokenizer: Tokenizer;
+        private tokenizers: Tokenizer[];
         private element: JQuery; 
 
         constructor(options: VisualConstructorOptions) {
 
             this.meta = {
                 name: 'Smart Filter',
-                version: '1.1.5',
+                version: '1.1.6',
                 dev: false
             };
             console.log('%c' + this.meta.name + ' by OKViz ' + this.meta.version + (this.meta.dev ? ' (BETA)' : ''), 'font-weight:bold');
@@ -189,7 +265,7 @@ module powerbi.extensibility.visual {
             this.selectionIdBuilder = options.host.createSelectionIdBuilder();
             this.selectionManager = options.host.createSelectionManager();
 
-            this.model = { dataPoints: [], filters: [], settings: <VisualSettings>{} };
+            this.model = { dataGroups: [], filters: [], settings: <VisualSettings>{} };
 
             this.element = $(options.element);
         }
@@ -212,18 +288,12 @@ module powerbi.extensibility.visual {
                 height: options.viewport.height - margin.top - margin.bottom
             };
 
-            let $container, $comboBox, tokenizer: Tokenizer;
+            let $container;
             if (dataChanged) {
-                
                 $container =  $('<div class="chart"></div>').appendTo(this.element);
-                $comboBox = $('<select class="tokenCombo"></select>').appendTo($container);
-
-                tokenizer = new Tokenizer($comboBox);
-                this.tokenizer = tokenizer;
+                this.tokenizers = [];
             } else {
                 $container = $('.chart');
-                $comboBox = $('.tokenCombo');
-                tokenizer = this.tokenizer;
             }
 
             $container.css({
@@ -233,157 +303,186 @@ module powerbi.extensibility.visual {
                 'margin-left': margin.left + 'px'
             });
 
-            if (tokenizer) {
+            for (let g = 0; g < this.model.dataGroups.length; g++) {
+                
+                let $comboBox, tokenizer: Tokenizer;
+
                 if (dataChanged) {
-                    tokenizer.maxElements = this.model.settings.search.limit || Infinity;
-                    tokenizer.compressMultiple = (this.model.settings.search.compressMultiple && this.model.settings.search.observerMode !== true);
-                    tokenizer.toggleResetter(this.model.settings.search.observerMode !== true);
-                    tokenizer.elementsFontSize = PixelConverter.fromPointToPixel(this.model.settings.search.fontSize); 
-                    tokenizer.elementsBackColor = this.model.settings.search.backFill.solid.color;
-                    tokenizer.elementsColor = (this.model.settings.search.fill ? this.model.settings.search.fill.solid.color : OKVizUtility.autoTextColor(this.model.settings.search.backFill.solid.color));
                     
-                    $('li.TokenSearch input').css({
-                        'font-size': tokenizer.elementsFontSize + 'px'
-                    });
-                    $('li.Token').css({
-                        'font-size': tokenizer.elementsFontSize + 'px',
-                        'background-color': tokenizer.elementsBackColor,
-                        'color': tokenizer.elementsColor
-                    });
+                    $comboBox = $('<select class="tokenCombo tokenCombo' + g + '"></select>').appendTo($container);
+                    tokenizer = new Tokenizer($comboBox, this.model.settings.search.label ? this.model.dataGroups[g].displayName : '', true); //this.model.dataGroups.length == 1
+                    this.tokenizers.push(tokenizer);
 
-                    $('li.Token a.Close').css({
-                        'background-color': tokenizer.elementsBackColor,
-                        'color': tokenizer.elementsColor
-                    });
-
-           
-                    $('.TokensContainer').css('border-width', (this.model.settings.search.border ?'1px' : '0'));
-
-                    let hasSelection = false;
-                    let selectionIds = selectionManager.getSelectionIds();
-
-                    let maxSelectedValues = 100;
-                    let selectedValues = 0;
-                    let values = [];
-
-                    for (let i = 0; i < this.model.dataPoints.length; i++) {
-                        let dataPoint = this.model.dataPoints[i];
-
-                        let value = tokenizer.sanitize(Object.prototype.toString.call(dataPoint.category) === '[object Date]' ? dateFormat(dataPoint.category) : String(dataPoint.category));
-
-                        values.push(value);
-
-                        let $option = $('<option value="' + value + '">' + value + '</option>')    
-                                .appendTo($comboBox);
-
-                        $option.data('datapoint', i);
-                        if (selectedValues < maxSelectedValues && dataPoint.selected) {
-                            $option.attr('selected', 'selected');
-                            selectedValues++;
-                        }
-                        if (dataPoint.selected) {
-
-                            hasSelection = true;
-                            let doSelect = true;
-
-                            for (let ii = 0; ii < selectionIds.length; ii++) {
-                                let selectionId = <visuals.ISelectionId>selectionIds[ii];
-                                
-                                if (selectionId.getKey() === dataPoint.identity.getKey()) {
-                                    doSelect = false;
-                                    break;
-                                }
-                            }
-                            if (doSelect) {
-
-                                selectionManager.select(dataPoint.identity, true);
-                                selectionManager.applySelectionFilter();
-                            }
-                        }
-                    }
-                    if (!hasSelection && this.model.settings.search.observerMode){
-                        for (let i = 0; i < Math.min(values.length, maxSelectedValues); i++) {
-                            $comboBox.find('option[value="' + values[i] + '"]').attr('selected', 'selected');
-                            selectedValues++;
-                        }
-                    }
-                    tokenizer.toggleReadonly(this.model.settings.search.observerMode);
-                    tokenizer.remap(values);
-                    tokenizer.toggleDropdownArrow(selectedValues < values.length);
-
-                    var self = this;
-                    let performSelection = function (value, add) {
-                        $comboBox.find('option').each(function (i, el) {
-
-                            if ($(this).val().trim() === value.trim()) {
-
-                                let dataPoint = self.model.dataPoints[$(this).data('datapoint')];
-                                if (dataPoint !== undefined) {
-                                    dataPoint.selected = add;
-
-                                    let found = false;
-
-                                    for (let i = 0; i < self.model.filters.length; i++) {
-                                        if (self.model.filters[i] === JSON.stringify(value)) {
-                                            if (!add)
-                                                self.model.filters.splice(i, 1)
-                                            found = true;
-                                            break;
-                                        }
-                                    } 
-
-                                    if (add && !found)
-                                        self.model.filters.push(JSON.stringify(value));
-         
-                                    selectionManager.select(dataPoint.identity, true);
-                                    selectionManager.applySelectionFilter();
-
-                                    host.persistProperties({
-                                        merge: [{
-                                            objectName: 'general',
-                                            selector: null,
-                                            properties: {
-                                                'selection': JSON.stringify(self.model.filters)
-                                            },
-                                        }]
-                                    });
-                                }
-
-                                return false; //Break each
-                                
-                            }
-                        });
-                    }; 
-
-                    tokenizer.onAddToken = function (value, text, e) {
-                        performSelection(value, true);
-                    };
-
-                    tokenizer.onRemoveToken = function (value, e) {
-                        performSelection(value, false);
-                    };
-
-                    tokenizer.onClear = function (e) {
-                        selectionManager.clear();
-                        for (let i = 0; i < self.model.dataPoints.length; i++)
-                            self.model.dataPoints[i].selected = false;
-
-                         host.persistProperties({
-                            remove: [{
-                                objectName: 'general',
-                                selector: null,
-                                properties: {
-                                    'filter': null,
-                                    'selection': null
-                                },
-                            }]
-                        });
-                    };
+                } else {
+                    $comboBox = $('.tokenCombo' + g);
+                    tokenizer = this.tokenizers[g];
                 }
 
-                tokenizer.container.width(containerSize.width);
-                $('.TokensContainer').css('max-height', containerSize.height + 'px');
-                $('ul.Dropdown').css('max-height', (containerSize.height - $('.TokensContainer').height()) + 'px');
+                if (tokenizer) {
+                    if (dataChanged) {
+                        tokenizer.maxElements = this.model.settings.search.limit || Infinity;
+                        tokenizer.compressMultiple = (this.model.settings.search.compressMultiple && this.model.settings.search.observerMode !== true);
+                        tokenizer.toggleResetter(this.model.settings.search.observerMode !== true);
+                        tokenizer.elementsFontSize = PixelConverter.fromPointToPixel(this.model.settings.search.fontSize); 
+                        tokenizer.elementsBackColor = this.model.settings.search.backFill.solid.color;
+                        tokenizer.elementsColor = (this.model.settings.search.fill ? this.model.settings.search.fill.solid.color : OKVizUtility.autoTextColor(this.model.settings.search.backFill.solid.color));
+                        
+                        $('li.TokenSearch input').css({
+                            'font-size': tokenizer.elementsFontSize + 'px'
+                        });
+                        $('li.Token').css({
+                            'font-size': tokenizer.elementsFontSize + 'px',
+                            'background-color': tokenizer.elementsBackColor,
+                            'color': tokenizer.elementsColor
+                        });
+
+                        $('li.Token a.Close').css({
+                            'background-color': tokenizer.elementsBackColor,
+                            'color': tokenizer.elementsColor
+                        });
+
+            
+                        $('.TokensContainer').css('border-width', (this.model.settings.search.border ?'1px' : '0'));
+
+                        let hasSomeSelection = false;
+                        let maxSelectedValues = 100;
+                        let selectedValues = 0;
+                        let values = [];
+                        
+                        for (let i = 0; i < this.model.dataGroups[g].dataPoints.length; i++) {
+                            let dataPoint = this.model.dataGroups[g].dataPoints[i];
+                            if (dataPoint.identities.length > 0) {
+                                let value = tokenizer.sanitize(Object.prototype.toString.call(dataPoint.displayName) === '[object Date]' ? dateFormat(dataPoint.displayName) : String(dataPoint.displayName));
+
+                                values.push(value);
+
+                                let $option = $('<option value="' + value + '">' + value + '</option>')    
+                                        .appendTo($comboBox);
+
+                                $option.data('datapoint', i);
+                                if (selectedValues < maxSelectedValues && dataPoint.selected) {
+                                    $option.attr('selected', 'selected');
+                                    selectedValues++;
+                                }
+                                if (dataPoint.selected) {
+
+                                    hasSomeSelection = true;
+                                    for (let s = 0; s < dataPoint.identities.length; s++) {
+                                        if (this.canSelectIdentity(dataPoint.identities[s], true)) {
+                                            selectionManager.select(dataPoint.identities[s], true);
+                                            selectionManager.applySelectionFilter();
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        
+
+                        if (!hasSomeSelection && this.model.settings.search.observerMode){
+                            for (let i = 0; i < Math.min(values.length, maxSelectedValues); i++) {
+                                $comboBox.find('option[value="' + values[i] + '"]').attr('selected', 'selected');
+                                selectedValues++;
+                            }
+                        }
+                        tokenizer.toggleReadonly(this.model.settings.search.observerMode);
+                        tokenizer.remap(values);
+                        tokenizer.toggleDropdownArrow(selectedValues < values.length);
+
+                        var self = this;
+                        let performSelection = function (value, add) {
+
+                            selectionManager.clear();
+
+                            for (let i = 0; i < self.model.dataGroups[g].dataPoints.length; i++){
+                                let dataPoint = self.model.dataGroups[g].dataPoints[i];
+                                if (dataPoint !== undefined) {
+
+                                    if (value == dataPoint.displayName) {
+
+                                        dataPoint.selected = add;
+
+                                        let categoryName = self.model.dataGroups[g].displayName;
+                                        let identities = dataPoint.identities.concat(dataPoint.hiddenIdentities);
+                                        for (let s = 0; s < identities.length; s++) {
+
+                                            let found = false;
+                                                if (categoryName in self.model.filters) {
+                                                for (let ii = 0; ii < self.model.filters[categoryName].length; ii++) {
+                                                    
+                                                    if (self.model.filters[categoryName][ii] === identities[s].getKey()) {
+                                                        if (!add)
+                                                            self.model.filters[categoryName].splice(ii, 1)
+                                                    
+                                                        found = true;
+                                                        break;
+                                                    }
+                                                }
+                                            }
+
+                                            if (add && !found) 
+                                                self.model.filters[categoryName].push(identities[s].getKey());
+                                    
+                                            if (self.canSelectIdentity(identities[s], add)) 
+                                               selectionManager.select(identities[s], true);
+
+                                        }
+                                        
+                                        selectionManager.applySelectionFilter();
+
+                                        host.persistProperties({
+                                            merge: [{
+                                                objectName: 'general',
+                                                selector: null,
+                                                properties: {
+                                                    'selection': JSON.stringify(self.model.filters)
+                                                },
+                                            }]
+                                        });
+
+                                        break;
+                                    }
+                                }
+
+                            }      
+                        }; 
+
+                        tokenizer.onAddToken = function (value, text, e) {
+                            setTimeout(function(){
+                                performSelection(value, true);     
+                            }, 100);
+                        };
+
+                        tokenizer.onRemoveToken = function (value, e) {
+                            performSelection(value, false);
+                        };
+
+                        tokenizer.onClear = function (e) {
+
+                            selectionManager.clear();
+                            for (let i = 0; i < self.model.dataGroups[g].dataPoints.length; i++)
+                                self.model.dataGroups[g].dataPoints[i].selected = false;
+
+                            self.model.filters = {};
+
+                            host.persistProperties({
+                                remove: [{
+                                    objectName: 'general',
+                                    selector: null,
+                                    properties: {
+                                        'filter': null,
+                                        'selection': null
+                                    },
+                                }]
+                            });
+
+                        };
+                    }
+
+                    tokenizer.container.width(containerSize.width);
+                    let offset = tokenizer.container.offset();
+                    tokenizer.container.find('.TokensContainer').css('max-height', (containerSize.height - offset.top) + 'px');
+                    tokenizer.container.find('ul.Dropdown').css('max-height', (containerSize.height - offset.top - tokenizer.container.find('.TokensContainer').height()) + 'px');
+                }
             }
 
             OKVizUtility.t([this.meta.name, this.meta.version], this.element, options, this.host, {
@@ -395,6 +494,33 @@ module powerbi.extensibility.visual {
 
             //Color Blind module
             OKVizUtility.applyColorBlindVision(this.model.settings.colorBlind.vision, d3.select(this.element[0]));
+        }
+
+        public canSelectIdentity(identity: visuals.ISelectionId, add) {
+
+            //Check if the filter is present in each category
+            for (let categoryName in this.model.filters) {
+                if (this.model.filters.hasOwnProperty(categoryName) && this.model.filters[categoryName].length > 0) {
+                    let found = false;
+                    for (let i = 0; i < this.model.filters[categoryName].length; i++) {
+                        if (this.model.filters[categoryName][i] == identity.getKey()) {
+                            found = true;
+                            break;
+                        }
+                    }
+                    if (!found) return false;
+                }
+            }
+            
+            let selectionIds = this.selectionManager.getSelectionIds();
+
+            for (let i = 0; i < selectionIds.length; i++) {
+                if (identity.getKey() == (<visuals.ISelectionId>selectionIds[i]).getKey()){
+                    return !add;
+                }
+            }
+                              
+            return add;
         }
 
         public destroy(): void {
@@ -418,6 +544,17 @@ module powerbi.extensibility.visual {
                     });
 
                     if (!this.model.settings.search.observerMode) {
+
+                        if (this.model.dataGroups.length > 1) {
+                            objectEnumeration.push({
+                                objectName: objectName,
+                                properties: {
+                                    "filterMultiple": this.model.settings.search.filterMultiple
+                                },
+                                selector: null
+                            });
+                        }
+
                         objectEnumeration.push({
                             objectName: objectName,
                             properties: {
@@ -434,7 +571,7 @@ module powerbi.extensibility.visual {
                             "backFill": this.model.settings.search.backFill,
                             "fill": this.model.settings.search.fill,
                             "fontSize": this.model.settings.search.fontSize,
-                            //"label": this.model.settings.search.label,
+                            "label": this.model.settings.search.label,
                             "border": this.model.settings.search.border
                         },
                         selector: null
@@ -465,6 +602,7 @@ module powerbi.extensibility.visual {
     export class Tokenizer {
 
         public maxElements: number;
+        public placeholder: string;
         public elementsFontSize: number;
         public elementsBackColor: string;
         public elementsColor: string;
@@ -502,7 +640,7 @@ module powerbi.extensibility.visual {
         public onDropdownShow: any = function (e) { };
         public onDuplicateToken: any = function (value, text, e) { };
 
-        public constructor(input: JQuery) {
+        public constructor(input: JQuery, placeholder: string, resetter: boolean) {
 
             var $this = this;
             this.readonly = false;
@@ -522,22 +660,23 @@ module powerbi.extensibility.visual {
                     else
                         $this.dropdown.hide();
                 });
-
-            this.dropdownResetter = $('<span class="slicerHeader"><span class="clear" title= "Clear selections"> </span></span>')
-                .on('click', function (e) {
-                    //e.stopImmediatePropagation();
-                    $this.searchInput.val('');
-                    $this.clear(false);
-                });
-
+            if (resetter) {
+                this.dropdownResetter = $('<span class="slicerHeader"><span class="clear" title= "Clear selections"> </span></span>')
+                    .on('click', function (e) {
+                        //e.stopImmediatePropagation();
+                        $this.searchInput.val('');
+                        $this.clear(false);
+                    });
+            }
             this.tokensContainer = $('<ul />')
                 .addClass('TokensContainer');
 
             this.searchToken = $('<li />')
                 .addClass('TokenSearch')
                 .appendTo(this.tokensContainer);
-
-            this.searchInput = $('<input />')
+            
+            this.placeholder = this.sanitize(placeholder);
+            this.searchInput = $('<input />').attr('placeholder', this.placeholder)
                 .appendTo(this.searchToken);
 
             if (this.select.prop('disabled')) {
@@ -547,9 +686,12 @@ module powerbi.extensibility.visual {
             this.container
                 .append(this.tokensContainer)
                 .append(this.dropdown)
-                .append(this.dropdownArrow)
-                .append(this.dropdownResetter)
-                .insertAfter(this.select);
+                .append(this.dropdownArrow);
+
+            if (resetter)
+                this.container.append(this.dropdownResetter)
+
+            this.container.insertAfter(this.select);
 
             this.tokensContainer.on('click', function (e) {
                 //e.stopImmediatePropagation();
@@ -724,11 +866,12 @@ module powerbi.extensibility.visual {
         }
 
         public toggleResetter(show: boolean) {
-            this.dropdownResetter.toggle(show);
+            if (this.dropdownResetter)
+                this.dropdownResetter.toggle(show);
         }
 
         public resizeSearchInput() {
-            this.searchInput.attr('size', Number(this.searchInput.val().length) + 5);
+            this.searchInput.attr('size', (this.searchInput.val().length < 2 ? Math.max(this.searchInput.attr('placeholder').length, 3) : this.searchInput.val().length + 3));
         }
 
         public resetSearchInput() {
@@ -835,7 +978,7 @@ module powerbi.extensibility.visual {
 
             if (!show && this.dropdown.is(':hidden')) return;
 
-            let chunk = 10;
+            let chunk = 15;
             let start = this.listStart || 0;
             let end = Math.min(start + chunk, this.cachedValues.length);
             this.listStart = end;
@@ -898,6 +1041,7 @@ module powerbi.extensibility.visual {
 
             let selectedItems = $('li.Token', this.tokensContainer).length;
             let useMultipleToken = (this.compressMultiple && selectedItems > 0);
+            this.searchInput.attr('placeholder', '');
 
             value = this.sanitize(value);
             if (value == undefined || value == '') {
@@ -986,7 +1130,7 @@ module powerbi.extensibility.visual {
                         .insertBefore(this.searchToken);
 
                 }
-                $tokenMultiple.find('span').text('Multiple (' + (selectedItems + 1) + ')');
+                $tokenMultiple.find('span').text((this.placeholder != '' ? this.placeholder : 'Multiple') + ' (' + (selectedItems + 1) + ')');
 
                 $('li.Token').hide();
             }
