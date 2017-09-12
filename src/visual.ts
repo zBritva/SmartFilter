@@ -96,6 +96,42 @@ module powerbi.extensibility.visual {
         };
     }
 
+    function initEmptyFilters(filters: any, dataView: DataView, host: IVisualHost) {
+        let dataCategorical = dataView.categorical;
+        for (let g = 0; g < dataCategorical.categories.length; g++) {
+            
+            let dataPoints: VisualDataPoint[] = [];
+
+            let category = dataCategorical.categories[g]; 
+            let values = category.values;
+
+            let categoryName = category.source.displayName;
+
+            if (filters.constructor == Array) {
+
+                //Keep compatible with old filters format
+                let oldFilters = filters.slice(0);
+                filters = {};
+                filters[categoryName] = [];
+                for (let i = 0; i < oldFilters.length; i++) {
+                    for (let ii = 0; ii < values.length; ii++) {
+                        if (String(values[ii]) == JSON.parse(oldFilters[i])) {
+                            let oldToIdentity = host.createSelectionIdBuilder().withCategory(category, ii).createSelectionId();
+                            filters[categoryName].push(oldToIdentity.getKey());
+                            break;
+                        }
+                    }
+                }
+
+            } else {
+                if (!(categoryName in filters))
+                    filters[categoryName] = [];
+            }
+        }
+
+        return filters;
+    }
+
     function visualTransform(options: VisualUpdateOptions, host: IVisualHost): VisualViewModel {
 
         //Get DataViews
@@ -139,6 +175,8 @@ module powerbi.extensibility.visual {
         let dataGroups:VisualDataGroup[] = [];
         let filters = (settings.general.selection ? JSON.parse(settings.general.selection) : {});
 
+        initEmptyFilters(filters, dataViews[0], host);
+
         if (hasCategoricalData) {
 
             let dataCategorical = dataViews[0].categorical;
@@ -150,27 +188,6 @@ module powerbi.extensibility.visual {
                 let values = category.values;
 
                 let categoryName = category.source.displayName;
-
-                if (filters.constructor == Array) {
-
-                    //Keep compatible with old filters format
-                    let oldFilters = filters.slice(0);
-                    filters = {};
-                    filters[categoryName] = [];
-                    for (let i = 0; i < oldFilters.length; i++) {
-                        for (let ii = 0; ii < values.length; ii++) {
-                            if (String(values[ii]) == JSON.parse(oldFilters[i])) {
-                                let oldToIdentity = host.createSelectionIdBuilder().withCategory(category, ii).createSelectionId();
-                                filters[categoryName].push(oldToIdentity.getKey());
-                                break;
-                            }
-                        }
-                    }
-
-                } else {
-                    if (!(categoryName in filters))
-                        filters[categoryName] = [];
-                }
 
                 for (let i = 0; i < values.length; i++) {
                     let displayName = String(values[i]);
@@ -271,7 +288,6 @@ module powerbi.extensibility.visual {
         }
         
         public update(options: VisualUpdateOptions) {
-
             let dataChanged = (options.type == VisualUpdateType.Data || options.type == VisualUpdateType.All || $('.chart').length == 0);
             if (dataChanged) {
                 this.model = visualTransform(options, this.host);
@@ -406,7 +422,7 @@ module powerbi.extensibility.visual {
                                         for (let s = 0; s < identities.length; s++) {
 
                                             let found = false;
-                                                if (categoryName in self.model.filters) {
+                                            if (categoryName in self.model.filters) {
                                                 for (let ii = 0; ii < self.model.filters[categoryName].length; ii++) {
                                                     
                                                     if (self.model.filters[categoryName][ii] === identities[s].getKey()) {
@@ -457,12 +473,11 @@ module powerbi.extensibility.visual {
                         };
 
                         tokenizer.onClear = function (e) {
-
                             selectionManager.clear();
                             for (let i = 0; i < self.model.dataGroups[g].dataPoints.length; i++)
                                 self.model.dataGroups[g].dataPoints[i].selected = false;
-
-                            self.model.filters = {};
+                            
+                            initEmptyFilters(self.model.filters, options.dataViews[0], host);
 
                             host.persistProperties({
                                 remove: [{
